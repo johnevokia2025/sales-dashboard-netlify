@@ -7,19 +7,16 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- NEW: The Netlify Identity Widget script -->
     <script type="text/javascript" src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
     <style>
-        /* All the CSS is the same as our last fast version */
+        /* All CSS is the same as the last working version */
         :root { --primary-color: #0d6efd; --accent-color: #6f42c1; --success-color: #198754; --warning-color: #fd7e14; --danger-color: #dc3545; --text-color: #212529; --light-text-color: #6c757d; --bg-color: #f8f9fa; --card-bg-color: #ffffff; --border-color: #dee2e6; }
         body { font-family: 'Inter', sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; display: flex; }
         .loader-container { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; width: 100%; }
         .spinner { width: 56px; height: 56px; border: 7px solid var(--border-color); border-top-color: var(--primary-color); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 1rem; }
         .loader-text { font-size: 1.2rem; font-weight: 500; color: var(--light-text-color); }
         @keyframes spin { to { transform: rotate(360deg); } }
-        /* NEW: Styles for the login button container */
         #netlify-identity-button-container { position: fixed; bottom: 20px; right: 20px; z-index: 100; }
-        /* (The rest of the CSS is the same as before) */
         .sidebar { width: 240px; background-color: var(--card-bg-color); height: 100vh; position: fixed; box-shadow: 0 4px 12px rgba(0,0,0,0.05); display: flex; flex-direction: column; border-right: 1px solid var(--border-color); }
         .sidebar-header { background-color: var(--accent-color); color: white; padding: 1.5rem; text-align: center; }
         .sidebar-header h2 { font-size: 1.2rem; margin-bottom: 0.25rem; }
@@ -67,33 +64,17 @@
     </style>
 </head>
 <body>
-    <div id="loader" class="loader-container">
-        <!-- Content will be managed by JS -->
-    </div>
-
-    <!-- This container is hidden until the user logs in -->
+    <div id="loader" class="loader-container"></div>
     <div id="dashboard-container">
         <div class="sidebar"></div>
-        <div class="main-content">
-            <!-- The content of this div will be built by JS based on the user's role -->
-        </div>
+        <div class="main-content"></div>
     </div>
-    
-    <!-- NEW: A container for the Netlify Identity login button -->
     <div id="netlify-identity-button-container" data-netlify-identity-button></div>
 
     <script>
-        // NEW: The entire script is replaced with login-aware logic
-        
-        // Listen for Netlify Identity events to control the UI
-        netlifyIdentity.on('login', user => {
-            netlifyIdentity.close();
-            fetchAndRenderDashboard(user);
-        });
-
-        netlifyIdentity.on('logout', () => {
-            location.reload();
-        });
+        // Listen for Netlify Identity events
+        netlifyIdentity.on('login', user => { netlifyIdentity.close(); fetchAndRenderDashboard(user); });
+        netlifyIdentity.on('logout', () => { location.reload(); });
 
         document.addEventListener("DOMContentLoaded", () => {
             const user = netlifyIdentity.currentUser();
@@ -109,16 +90,13 @@
         async function fetchAndRenderDashboard(user) {
             try {
                 const token = await user.jwt();
-                const response = await fetch('/.netlify/functions/getData', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
+                const response = await fetch('/.netlify/functions/getData', { headers: { 'Authorization': `Bearer ${token}` } });
                 if (!response.ok) {
                     const errorData = await response.json();
                     throw new Error(errorData.details || `Server error: ${response.statusText}`);
                 }
                 const data = await response.json();
 
-                // ROUTER: Decide which dashboard to build based on the view
                 if (data.view === 'Agent') {
                     renderAgentDashboard(data);
                 } else if (data.view === 'Manager') {
@@ -140,7 +118,10 @@
 
         // --- RENDER FUNCTION FOR AGENT VIEW ---
         function renderAgentDashboard(data) {
-            const sidebarHtml = `<div class="sidebar-header"><h2>${data.header.name}</h2><div class="rank">Rank: <strong>${data.header.rank}</strong> of ${data.header.totalAgents}</div><div class="points">${data.header.points.toLocaleString()} pts</div></div><nav><a class="nav-link active" onclick="showPage('overview')"><i class="material-icons">dashboard</i>Overview</a><a class="nav-link" onclick="showPage('leaderboard')"><i class="material-icons">emoji_events</i>Leaderboard</a><a class="nav-link" onclick="showPage('history')"><i class="material-icons">history</i>Activity History</a></nav>`;
+            // THE FIX IS HERE: Default points to 0 if they are missing, preventing toLocaleString() from crashing.
+            const userPoints = data.header.points || 0;
+
+            const sidebarHtml = `<div class="sidebar-header"><h2>${data.header.name}</h2><div class="rank">Rank: <strong>${data.header.rank || 'N/A'}</strong></div><div class="points">${userPoints.toLocaleString()} pts</div></div><nav><a class="nav-link active" onclick="showPage('overview')"><i class="material-icons">dashboard</i>Overview</a><a class="nav-link" onclick="showPage('leaderboard')"><i class="material-icons">emoji_events</i>Leaderboard</a><a class="nav-link" onclick="showPage('history')"><i class="material-icons">history</i>Activity History</a></nav>`;
             document.querySelector('.sidebar').innerHTML = sidebarHtml;
             
             const mainContent = document.querySelector('.main-content');
@@ -149,73 +130,59 @@
                 <div id="page-leaderboard" class="page"></div>
                 <div id="page-history" class="page"></div>
             `;
-            // Call the same build functions we perfected before
             buildOverviewPage(data);
             buildLeaderboardPage(data);
             buildHistoryPage(data);
         }
 
-        // --- NEW: RENDER FUNCTION FOR MANAGER VIEW ---
-        function renderManagerDashboard(data) {
-            document.querySelector('.sidebar').innerHTML = `<div class="sidebar-header"><h2>Manager View</h2><div class="rank">${data.header.name}</div></div>`;
-            const mainContent = document.querySelector('.main-content');
+        function buildOverviewPage(data) {
+            const overviewPage = document.getElementById('page-overview');
+            overviewPage.innerHTML = `<h1>Sales Dashboard</h1><div class="grid-container kpi-grid card"><div class="kpi-card"><h3>Revenue (This Month)</h3><div class="value">${data.kpis.myRevenue}</div></div><div class="kpi-card"><h3>Quota Progress</h3><div class="value">${data.kpis.quotaProgress}%</div></div><div class="kpi-card"><h3>Avg. Deal Size (Month)</h3><div class="value">${data.kpis.avgDealSize}</div></div><div class="kpi-card"><h3>Commission (This Month)</h3><div class="value">${data.kpis.myCommission}</div></div></div><div class="grid-container charts-grid"><div class="card"><h2>Quota Attainment</h2><div class="gauge-container"><canvas id="quotaGaugeChart"></canvas><div id="quotaGaugeText" class="gauge-text"></div></div></div><div class="card"><h2>Sales Pipeline</h2><div class="chart-container"><canvas id="pipelineChart"></canvas></div></div><div class="card"><h2>Revenue by Product</h2><div class="chart-container"><canvas id="productChart"></canvas></div></div></div><div class="grid-container action-grid"><div class="card"><h2>Weekly Missions</h2><div id="missions-container"></div></div><div class="card"><h2>Top 3 Agents</h2><div id="mini-leaderboard-container"></div></div><div class="card"><h2>Your Next Target</h2><div id="next-target-container"></div></div></div>`;
+            renderCharts(data.chartData, data.kpis.quotaProgress);
+
+            let missionsHtml = '';
+            (data.tasks || []).forEach(task => { const isCompleted = task.status === 'Completed'; missionsHtml += `<div class="mission"><input type="checkbox" id="task-${task.id}" ${isCompleted ? 'checked disabled' : ''} onchange="handleTaskClick(this, '${task.id}')"><label for="task-${task.id}" style="flex-grow:1; margin-left:0.5rem;">${task.description}</label><strong style="color:var(--success-color);">+${task.points}</strong></div>`; });
+            document.getElementById('missions-container').innerHTML = missionsHtml || '<p>No active missions.</p>';
             
-            let kpiHtml = '';
-            for (const [key, value] of Object.entries(data.kpis)) {
-                const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
-                kpiHtml += `<div class="kpi-card"><h3>${label}</h3><div class="value">${value}</div></div>`;
+            let miniLeaderboardHtml = '';
+            const rankIconsMini = ['🥇', '🥈', '🥉'];
+            (data.leaderboard || []).slice(0, 3).forEach((agent, index) => { miniLeaderboardHtml += `<div class="leaderboard-row"><div class="rank">${rankIconsMini[index]}</div><div class="name">${agent.name}</div><div class="points">${(agent.points || 0).toLocaleString()} pts</div></div>`; });
+            document.getElementById('mini-leaderboard-container').innerHTML = miniLeaderboardHtml;
+
+            let nextTargetHtml = '';
+            const myRank = data.header.rank;
+            // THE FIX IS HERE: Add checks to ensure agentAbove and their points exist before doing math.
+            if (myRank > 1 && data.leaderboard && data.leaderboard.length >= myRank) {
+                const agentAbove = data.leaderboard[myRank - 2];
+                if (agentAbove && typeof agentAbove.points === 'number' && typeof data.header.points === 'number') {
+                    const pointsNeeded = agentAbove.points - data.header.points;
+                    nextTargetHtml = `<p>You are <strong>${pointsNeeded.toLocaleString()} points</strong> behind ${agentAbove.name}!</p>`;
+                } else {
+                    nextTargetHtml = `<p>Keep climbing the ranks!</p>`;
+                }
+            } else {
+                nextTargetHtml = `<p style="font-size: 1.2rem; text-align: center;">🎉<br>You're #1! Great work!</p>`;
             }
-
-            let teamHtml = '';
-            data.teamPerformance.forEach(agent => {
-                teamHtml += `<tr><td>${agent.name}</td><td>${agent.team}</td><td>$${agent.achieved}</td><td>$${agent.quota}</td><td><div class="progress-bar"><div class="progress-bar-inner" style="width: ${agent.progress}%;"></div></div></td></tr>`;
-            });
-            
-            mainContent.innerHTML = `
-                <h1>Sales Manager Dashboard</h1>
-                <div class="grid-container kpi-grid card">${kpiHtml}</div>
-                <div class="grid-container" style="grid-template-columns: 2fr 1fr;">
-                    <div class="card"><h2>Team Performance (This Month)</h2><div style="max-height: 400px; overflow-y: auto;"><table><thead><tr><th>Agent</th><th>Team</th><th>Achieved</th><th>Quota</th><th>Progress</th></tr></thead><tbody>${teamHtml}</tbody></table></div></div>
-                    <div class="card"><h2>Revenue by Team</h2><div style="height: 350px;"><canvas id="teamChart"></canvas></div></div>
-                </div>`;
-
-            new Chart(document.getElementById('teamChart'), {
-                type: 'doughnut', data: { labels: data.chartData.salesByTeam.labels, datasets: [{ data: data.chartData.salesByTeam.data, backgroundColor: ['#0d6efd', '#6f42c1', '#198754'] }] },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
-            });
+            document.getElementById('next-target-container').innerHTML = nextTargetHtml;
         }
 
-        // --- NEW: RENDER FUNCTION FOR HR VIEW ---
-        function renderHRDashboard(data) {
-             document.querySelector('.sidebar').innerHTML = `<div class="sidebar-header"><h2>HR View</h2><div class="rank">${data.header.name}</div></div>`;
-            const mainContent = document.querySelector('.main-content');
+        // The rest of the functions are unchanged
+        function buildLeaderboardPage(data) { /* ... Same as last version ... */ }
+        function buildHistoryPage(data) { /* ... Same as last version ... */ }
+        function renderManagerDashboard(data) { /* ... Same as last version ... */ }
+        function renderHRDashboard(data) { /* ... Same as last version ... */ }
+        function handlePost(e) { /* ... Same as last version ... */ }
+        function renderCharts(chartData, quotaProgress) { /* ... Same as last version ... */ }
+        function showPage(pageName) { /* ... Same as last version ... */ }
 
-            let personnelHtml = '';
-            data.personnel.forEach(p => { personnelHtml += `<tr><td>${p.name}</td><td>${p.email}</td><td>${p.role}</td><td>${p.team}</td></tr>`; });
-
-            mainContent.innerHTML = `
-                <h1>HR Dashboard</h1>
-                <div class="grid-container" style="grid-template-columns: 1fr 1fr;">
-                    <div class="card"><h2>Post New Announcement</h2><form id="announcement-form"><input type="text" id="announcement-title" placeholder="Announcement Title" required><textarea id="announcement-message" rows="4" placeholder="Announcement Message" required></textarea><button type="submit">Post Announcement</button></form></div>
-                    <div class="card"><h2>Personnel Directory</h2><div style="max-height: 400px; overflow-y: auto;"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Team</th></tr></thead><tbody>${personnelHtml}</tbody></table></div></div>
-                </div>`;
-            
-            // Re-attach event listener since we overwrote the HTML
-            document.getElementById('announcement-form').addEventListener('submit', handlePost);
-        }
-        
-        async function handlePost(e) {
-            e.preventDefault();
-            // In a real app, this would be a separate Netlify function for writing data
-            alert('Posting functionality coming soon!');
-        }
-        
-        // (All the existing build/render functions for the Agent view are still needed below)
-        function buildOverviewPage(data) { /* ... Same as before ... */ }
-        function buildLeaderboardPage(data) { /* ... Same as before ... */ }
-        function buildHistoryPage(data) { /* ... Same as before ... */ }
-        function renderCharts(chartData, quotaProgress) { /* ... Same as before ... */ }
-        function showPage(pageName) { /* ... Same as before ... */ }
+        // Need to paste the full versions of these functions back in
+        function buildLeaderboardPage(data) { let topLeaderHtml = ''; const top3 = data.leaderboard.slice(0, 3); const rankIcons = ['🥇', '🥈', '🥉']; top3.forEach((agent, index) => { topLeaderHtml += `<div class="card leader-card rank-${index + 1}"><span class="rank-icon">${rankIcons[index]}</span><h3>${agent.name}</h3><p class="points-label">${(agent.points || 0).toLocaleString()} pts</p></div>`; }); let fullLeaderboardHtml = ''; data.leaderboard.forEach(agent => { const isCurrentUser = agent.name === data.header.name; fullLeaderboardHtml += `<tr style="${isCurrentUser ? 'background-color: #e9ecef; font-weight: 600;' : ''}"><td>#${agent.rank}</td><td>${agent.name} ${isCurrentUser ? '(You)' : ''}</td><td>${agent.team}</td><td>${(agent.points || 0).toLocaleString()}</td></tr>`; }); const pageHtml = `<h1>Team Leaderboard</h1><div class="top-leader-grid">${topLeaderHtml}</div><div class="card"><h2>Full Rankings</h2><table><thead><tr><th>Rank</th><th>Agent</th><th>Team</th><th>Total Points</th></tr></thead><tbody>${fullLeaderboardHtml}</tbody></table></div>`; document.getElementById('page-leaderboard').innerHTML = pageHtml; }
+        function buildHistoryPage(data) { let historyHtml = ''; data.history.forEach(item => { historyHtml += `<tr><td>${item.date}</td><td>${item.action}</td><td>${item.points}</td></tr>`; }); const pageHtml = `<h1>Your Activity History</h1><div class="card"><table><thead><tr><th>Date</th><th>Action</th><th>Points Awarded</th></tr></thead><tbody>${historyHtml}</tbody></table></div>`; document.getElementById('page-history').innerHTML = pageHtml; }
+        function renderManagerDashboard(data) { document.querySelector('.sidebar').innerHTML = `<div class="sidebar-header"><h2>Manager View</h2><div class="rank">${data.header.name}</div></div>`; const mainContent = document.querySelector('.main-content'); let kpiHtml = ''; for (const [key, value] of Object.entries(data.kpis)) { const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()); kpiHtml += `<div class="kpi-card"><h3>${label}</h3><div class="value">${value}</div></div>`; } let teamHtml = ''; data.teamPerformance.forEach(agent => { teamHtml += `<tr><td>${agent.name}</td><td>${agent.team}</td><td>$${agent.achieved}</td><td>$${agent.quota}</td><td><div class="progress-bar"><div class="progress-bar-inner" style="width: ${agent.progress}%;"></div></div></td></tr>`; }); mainContent.innerHTML = `<h1>Sales Manager Dashboard</h1><div class="grid-container kpi-grid card">${kpiHtml}</div><div class="grid-container" style="grid-template-columns: 2fr 1fr;"><div class="card"><h2>Team Performance (This Month)</h2><div style="max-height: 400px; overflow-y: auto;"><table><thead><tr><th>Agent</th><th>Team</th><th>Achieved</th><th>Quota</th><th>Progress</th></tr></thead><tbody>${teamHtml}</tbody></table></div></div><div class="card"><h2>Revenue by Team</h2><div style="height: 350px;"><canvas id="teamChart"></canvas></div></div></div>`; new Chart(document.getElementById('teamChart'), { type: 'doughnut', data: { labels: data.chartData.salesByTeam.labels, datasets: [{ data: data.chartData.salesByTeam.data, backgroundColor: ['#0d6efd', '#6f42c1', '#198754'] }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } } }); }
+        function renderHRDashboard(data) { document.querySelector('.sidebar').innerHTML = `<div class="sidebar-header"><h2>HR View</h2><div class="rank">${data.header.name}</div></div>`; const mainContent = document.querySelector('.main-content'); let personnelHtml = ''; data.personnel.forEach(p => { personnelHtml += `<tr><td>${p.name}</td><td>${p.email}</td><td>${p.role}</td><td>${p.team}</td></tr>`; }); mainContent.innerHTML = `<h1>HR Dashboard</h1><div class="grid-container" style="grid-template-columns: 1fr 1fr;"><div class="card"><h2>Post New Announcement</h2><form id="announcement-form"><input type="text" id="announcement-title" placeholder="Announcement Title" required><textarea id="announcement-message" rows="4" placeholder="Announcement Message" required></textarea><button type="submit">Post Announcement</button></form></div><div class="card"><h2>Personnel Directory</h2><div style="max-height: 400px; overflow-y: auto;"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Team</th></tr></thead><tbody>${personnelHtml}</tbody></table></div></div></div>`; document.getElementById('announcement-form').addEventListener('submit', handlePost); }
+        function handlePost(e) { e.preventDefault(); alert('Posting functionality coming soon!'); }
+        let myCharts = {}; function renderCharts(chartData, quotaProgress) { Object.values(myCharts).forEach(chart => chart.destroy()); const quotaCtx = document.getElementById('quotaGaugeChart').getContext('2d'); const progress = parseFloat(quotaProgress); document.getElementById('quotaGaugeText').textContent = progress.toFixed(1) + '%'; myCharts.quota = new Chart(quotaCtx, { type: 'doughnut', data: { datasets: [{ data: [progress, 100 - progress], backgroundColor: ['var(--primary-color)', '#e9ecef'], borderColor: 'var(--card-bg-color)', borderWidth: 4, cutout: '80%' }] }, options: { responsive: true, maintainAspectRatio: false, circumference: 180, rotation: -90, plugins: { legend: { display: false }, tooltip: { enabled: false } } } }); const pipelineCtx = document.getElementById('pipelineChart').getContext('2d'); myCharts.pipeline = new Chart(pipelineCtx, { type: 'bar', data: { labels: chartData.pipelineFunnel.labels, datasets: [{ label: 'Potential Revenue', data: chartData.pipelineFunnel.data, backgroundColor: ['#6f42c1', '#855eca', '#9b7ad3', '#b297dd'], borderWidth: 0 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { callback: value => '$' + (value/1000) + 'k' } } } } }); const productCtx = document.getElementById('productChart').getContext('2d'); myCharts.product = new Chart(productCtx, { type: 'doughnut', data: { labels: chartData.revenueByProduct.labels, datasets: [{ label: 'Revenue', data: chartData.revenueByProduct.data, backgroundColor: ['#0d6efd', '#6f42c1', '#198754', '#fd7e14', '#6c757d'], borderColor: 'var(--card-bg-color)', borderWidth: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } } }); }
+        function showPage(pageName) { document.querySelectorAll('.page').forEach(p => p.classList.remove('active')); document.getElementById('page-' + pageName).classList.add('active'); document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active')); document.querySelector(`.nav-link[onclick="showPage('${pageName}')"]`).classList.add('active'); }
     </script>
 </body>
 </html>
