@@ -18,8 +18,7 @@ exports.handler = async (event, context) => {
         // 3. Setup Google Sheets API client
         const auth = new google.auth.GoogleAuth({
             credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON),
-            // IMPORTANT: This scope allows both reading and writing
-            scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+            scopes: ['https://www.googleapis.com/auth/spreadsheets'], // Allows writing
         });
         const sheets = google.sheets({ version: 'v4', auth });
         const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
@@ -45,11 +44,12 @@ exports.handler = async (event, context) => {
         // 6. Append the new row to the HR_Announcements sheet
         await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'HR_Announcements!A:D',
+            range: 'HR_Announcements!A:E', // Corrected range to include Audience
             valueInputOption: 'USER_ENTERED',
             resource: {
                 values: [
-                    [new Date().toISOString(), userEmail, title, message, 'All']
+                    // THE FIX IS HERE: Use new Date() directly
+                    [new Date(), userEmail, title, message, 'All']
                 ],
             },
         });
