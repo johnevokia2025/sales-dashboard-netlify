@@ -67,7 +67,6 @@ const parseNumber = (value) => {
 
 // --- DATA LOGIC FOR AGENT ---
 async function getAgentDashboardData({ sheets, SPREADSHEET_ID, userEmail, currentUserInfo }) {
-    // This is the complete, correct version of this function
     const ranges = ['Sales_Log!A2:F', 'Gamification_Tasks!A2:E', 'Agent_Activity_Log!A2:D', 'Sales_Pipeline!A2:F', 'Sales_Agents!A2:F'];
     const response = await sheets.spreadsheets.values.batchGet({ spreadsheetId: SPREADSHEET_ID, ranges });
     const [salesLogData=[], tasksData=[], activityLogData=[], pipelineData=[], agentsData=[]] = response.data.valueRanges.map(r => r.values || []);
@@ -84,7 +83,7 @@ async function getAgentDashboardData({ sheets, SPREADSHEET_ID, userEmail, curren
     const myCommission = mySalesThisMonth.reduce((sum, sale) => sum + (sale[4] * sale[5]), 0);
     const dealsClosed = mySalesThisMonth.length;
     const avgDealSize = dealsClosed > 0 ? myRevenue / dealsClosed : 0;
-    const myQuota = currentUserInfo[4] || 0;
+    const myQuota = parseNumber(currentUserInfo[4]);
     const quotaProgress = myQuota > 0 ? (myRevenue / myQuota) * 100 : 0;
 
     const leaderboard = allAgents.filter(a => a[2] === 'Agent').map(a => ({ name: a[0], team: a[3], points: a[5] || 0 })).sort((a,b) => b.points - a.points).map((a,i) => ({...a, rank: i+1}));
@@ -104,7 +103,7 @@ async function getAgentDashboardData({ sheets, SPREADSHEET_ID, userEmail, curren
     
     return {
         view: 'Agent',
-        header: { name: currentUserInfo[0], points: currentUserInfo[5] || 0, rank: myRankInfo ? myRankInfo.rank : 'N/A', totalAgents: leaderboard.length },
+        header: { name: currentUserInfo[0], points: parseNumber(currentUserInfo[5]), rank: myRankInfo ? myRankInfo.rank : 'N/A', totalAgents: leaderboard.length },
         kpis: { myRevenue: myRevenue.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }), myCommission: myCommission.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }), avgDealSize: avgDealSize.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }), quotaProgress: quotaProgress.toFixed(1) },
         tasks: tasks,
         history: history,
@@ -115,37 +114,52 @@ async function getAgentDashboardData({ sheets, SPREADSHEET_ID, userEmail, curren
 
 // --- DATA LOGIC FOR MANAGER ---
 async function getManagerDashboardData({ sheets, SPREADSHEET_ID, currentUserInfo }) {
-    const ranges = ['Sales_Agents!A2:F', 'Sales_Log!A2:F'];
+    const ranges = ['Sales_Agents!A2:F', 'Sales_Log!A2:F', 'Sales_Pipeline!A2:F'];
     const response = await sheets.spreadsheets.values.batchGet({ spreadsheetId: SPREADSHEET_ID, ranges });
-    const [agentsData=[], salesLogData=[]] = response.data.valueRanges.map(r => r.values || []);
+    const [agentsData=[], salesLogData=[], pipelineData=[]] = response.data.valueRanges.map(r => r.values || []);
+
+    const salesLog = salesLogData.map(r => [new Date(r[0]), r[1], r[2], r[3], parseNumber(r[4]), parseNumber(r[5])]);
+    const agents = agentsData.map(row => [row[0], row[1], row[2], row[3], parseNumber(row[4]), parseNumber(row[5])]).filter(agent => agent[2] === 'Agent');
+    const pipeline = pipelineData.map(r => [r[0], r[1], r[2], parseNumber(r[3]), r[4], new Date(r[5])]);
 
     const startOfMonth = new Date(); startOfMonth.setDate(1); startOfMonth.setHours(0,0,0,0);
-    const salesThisMonth = salesLogData.map(r => [new Date(r[0]), r[1], r[2], r[3], parseNumber(r[4]), parseNumber(r[5])]).filter(sale => sale[0] >= startOfMonth);
-    
+    const salesThisMonth = salesLog.filter(sale => sale[0] >= startOfMonth);
     const totalRevenue = salesThisMonth.reduce((sum, sale) => sum + sale[4], 0);
     const dealsClosed = salesThisMonth.length;
     const avgDealSize = dealsClosed > 0 ? totalRevenue / dealsClosed : 0;
-    
-    const agents = agentsData.map(row => [row[0], row[1], row[2], row[3], parseNumber(row[4]), parseNumber(row[5])]).filter(agent => agent[2] === 'Agent');
-    const totalQuota = agents.reduce((sum, agent) => sum + (agent[4] || 0), 0);
+    const totalQuota = agents.reduce((sum, agent) => sum + agent[4], 0);
     const quotaAttainment = totalQuota > 0 ? (totalRevenue / totalQuota) * 100 : 0;
 
-    const teamPerformance = agents.map(agent => { const agentEmail = agent[1].toLowerCase(); const agentSales = salesThisMonth.filter(sale => sale[1].toLowerCase() === agentEmail); const achieved = agentSales.reduce((sum, sale) => sum + sale[4], 0); const quota = agent[4] || 0; const progress = quota > 0 ? (achieved / quota) * 100 : 0; return { name: agent[0], team: agent[3], quota, achieved, progress: Math.min(progress, 100) }; }).sort((a,b) => b.achieved - a.achieved);
+    const teamPerformance = agents.map(agent => { const agentSales = salesThisMonth.filter(sale => sale[1].toLowerCase() === agent[1].toLowerCase()); const achieved = agentSales.reduce((sum, sale) => sum + sale[4], 0); return { name: agent[0], team: agent[3], quota: agent[4], achieved, progress: agent[4] > 0 ? (achieved / agent[4]) * 100 : 0 }; }).sort((a,b) => b.achieved - a.achieved);
 
-    const salesByTeam = teamPerformance.reduce((acc, agent) => { const team = agent.team || 'Unassigned'; acc[team] = (acc[team] || 0) + agent.achieved; return acc; }, {});
+    const pointsLeaderboard = agents.sort((a, b) => b[5] - a[5]).slice(0, 5).map(agent => ({ name: agent[0], points: agent[5] }));
+
+    const pipelineStages = { 'Prospecting': 0, 'Qualification': 0, 'Demo': 0, 'Negotiation': 0 };
+    pipeline.forEach(deal => { if (pipelineStages.hasOwnProperty(deal[4])) { pipelineStages[deal[4]] += deal[3]; } });
+
+    const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const recentSales = salesLog.filter(sale => sale[0] >= sixMonthsAgo);
+    const monthlyRevenue = {};
+    recentSales.forEach(sale => { const month = sale[0].toLocaleString('default', { month: 'short', year: '2-digit' }); monthlyRevenue[month] = (monthlyRevenue[month] || 0) + sale[4]; });
+    const sortedMonths = Object.keys(monthlyRevenue).sort((a,b) => new Date(a) - new Date(b));
+    const revenueTrend = { labels: sortedMonths, data: sortedMonths.map(month => monthlyRevenue[month]) };
 
     return {
         view: 'Manager',
         header: { name: currentUserInfo[0] },
-        kpis: { totalRevenue: totalRevenue.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }), dealsClosed: dealsClosed, avgDealSize: avgDealSize.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }), quotaAttainment: quotaAttainment.toFixed(1) + '%' },
+        kpis: { totalRevenue: totalRevenue.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }), dealsClosed, avgDealSize: avgDealSize.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }), quotaAttainment: quotaAttainment.toFixed(1) + '%' },
         teamPerformance: teamPerformance.map(p => ({...p, quota: p.quota.toLocaleString(), achieved: p.achieved.toLocaleString()})),
-        chartData: { salesByTeam: { labels: Object.keys(salesByTeam), data: Object.values(salesByTeam) } }
+        pointsLeaderboard,
+        chartData: {
+            pipelineFunnel: { labels: Object.keys(pipelineStages), data: Object.values(pipelineStages) },
+            revenueTrend
+        }
     };
 }
 
 // --- DATA LOGIC FOR HR ---
 async function getHRDashboardData({ sheets, SPREADSHEET_ID, currentUserInfo }) {
-    const ranges = ['Sales_Agents!A2:D'];
+     const ranges = ['Sales_Agents!A2:D'];
     const response = await sheets.spreadsheets.values.batchGet({ spreadsheetId: SPREADSHEET_ID, ranges });
     const [agentsData=[]] = response.data.valueRanges.map(r => r.values || []);
     
