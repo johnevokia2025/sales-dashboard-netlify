@@ -1,5 +1,11 @@
 const { google } = require('googleapis');
 
+// Helper function to get the start of the current month
+function getStartOfMonth() {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
 // Main function that Netlify will run
 exports.handler = async (event) => {
     try {
@@ -10,10 +16,7 @@ exports.handler = async (event) => {
         });
         const sheets = google.sheets({ version: 'v4', auth });
 
-        // Get the spreadsheet ID from environment variables
         const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-
-        // Get user email from the request URL (e.g., /api/getData?user=john@evokia.com)
         const userEmail = event.queryStringParameters.user?.toLowerCase();
         if (!userEmail) {
             throw new Error("User email is required.");
@@ -21,8 +24,8 @@ exports.handler = async (event) => {
 
         // --- Fetch all data from sheets in parallel ---
         const ranges = [
-            'Sales_Agents!A:F', 'Sales_Log!A:F', 'Gamification_Tasks!A:E',
-            'Agent_Activity_Log!A:D', 'Sales_Pipeline!A:F'
+            'Sales_Agents!A2:F', 'Sales_Log!A2:F', 'Gamification_Tasks!A2:E',
+            'Agent_Activity_Log!A2:D', 'Sales_Pipeline!A2:F'
         ];
         const response = await sheets.spreadsheets.values.batchGet({
             spreadsheetId: SPREADSHEET_ID,
@@ -30,9 +33,9 @@ exports.handler = async (event) => {
         });
 
         const [
-            agentsData, salesLogData, tasksData,
-            activityLogData, pipelineData
-        ] = response.data.valueRanges.map(range => range.values ? range.values.slice(1) : []); // .slice(1) to skip headers
+            agentsData = [], salesLogData = [], tasksData = [],
+            activityLogData = [], pipelineData = []
+        ] = response.data.valueRanges.map(range => range.values || []);
         
         // --- Process the data (logic copied from our old Code.gs) ---
         const allAgents = agentsData.map(row => [row[0], row[1], row[2], row[3], Number(row[4] || 0), Number(row[5] || 0)]);
@@ -41,13 +44,11 @@ exports.handler = async (event) => {
             throw new Error("User not found in agent list.");
         }
 
-        const salesLog = salesLogData.map(r => [new Date(r[0]), r[1], r[2], r[3], Number(r[4]), Number(r[5])]);
-        const pipeline = pipelineData.map(r => [r[0], r[1], r[2], Number(r[3]), r[4], new Date(r[5])]);
-        const activityLog = activityLogData.map(r => [new Date(r[0]), r[1], r[2], Number(r[3])]);
+        const salesLog = salesLogData.map(r => [new Date(r[0]), r[1], r[2], r[3], Number(r[4] || 0), Number(r[5] || 0)]);
+        const pipeline = pipelineData.map(r => [r[0], r[1], r[2], Number(r[3] || 0), r[4], new Date(r[5])]);
+        const activityLog = activityLogData.map(r => [new Date(r[0]), r[1], r[2], Number(r[3] || 0)]).sort((a,b) => b[0] - a[0]); // Sort descending
         
-        const startOfMonth = new Date();
-        startOfMonth.setDate(1);
-        startOfMonth.setHours(0, 0, 0, 0);
+        const startOfMonth = getStartOfMonth();
 
         const mySalesThisMonth = salesLog.filter(sale => sale[1] && sale[1].toLowerCase() === userEmail && sale[0] >= startOfMonth);
         const myRevenue = mySalesThisMonth.reduce((sum, sale) => sum + sale[4], 0);
@@ -60,14 +61,41 @@ exports.handler = async (event) => {
         const leaderboard = allAgents.filter(a => a[2] === 'Agent').map(a => ({ name: a[0], team: a[3], points: a[5] || 0 })).sort((a,b) => b.points - a.points).map((a,i) => ({...a, rank: i+1}));
         const myRankInfo = leaderboard.find(agent => agent.name === currentUserInfo[0]);
 
-        // ... Add logic for tasks, history, chartData here if needed, simplified for clarity ...
+        // --- THE FIX IS HERE: Re-adding the missing data calculations ---
+        // 1. Calculate Tasks
+        const now = new Date();
+        const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
+        startOfWeek.setHours(0,0,0,0);
+        const userActivitiesThisWeek = activityLog.filter(log => log[1] && log[1].toLowerCase() === userEmail && log[0] >= startOfWeek);
+        const tasks = tasksData.filter(task => task[2] === 'Manual').map(task => {
+            const taskId = task[0];
+            const isCompleted = userActivitiesThisWeek.some(activity => activity[2].includes(taskId) || activity[2].includes(task[1]));
+            return { id: taskId, description: task[1], points: Number(task[3]), status: isCompleted ? 'Completed' : 'Pending' };
+        });
+
+        // 2. Calculate History
+        const history = activityLog.filter(log => log[1] && log[1].toLowerCase() === userEmail)
+                                 .map(log => ({ date: log[0].toLocaleDateString(), action: log[2], points: `+${log[3]}` }))
+                                 .slice(0, 20);
+
+        // 3. Calculate Chart Data
+        const myPipelineDeals = pipeline.filter(deal => deal[1] && deal[1].toLowerCase() === userEmail);
+        const pipelineStages = { 'Prospecting': 0, 'Qualification': 0, 'Demo': 0, 'Negotiation': 0 };
+        myPipelineDeals.forEach(deal => { if (pipelineStages.hasOwnProperty(deal[4])) { pipelineStages[deal[4]] += deal[3]; } });
+        const revenueByProduct = mySalesThisMonth.reduce((acc, sale) => { const product = sale[3] || 'Unknown'; acc[product] = (acc[product] || 0) + sale[4]; return acc; }, {});
+        const chartData = {
+            pipelineFunnel: { labels: Object.keys(pipelineStages), data: Object.values(pipelineStages) },
+            revenueByProduct: { labels: Object.keys(revenueByProduct), data: Object.values(revenueByProduct) }
+        };
         
-        // --- Package the final data object ---
+        // --- Package the COMPLETE final data object ---
         const finalData = {
              header: { name: currentUserInfo[0], points: currentUserInfo[5] || 0, rank: myRankInfo ? myRankInfo.rank : 'N/A', totalAgents: leaderboard.length },
              kpis: { myRevenue: myRevenue.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }), myCommission: myCommission.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }), avgDealSize: avgDealSize.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }), quotaProgress: quotaProgress.toFixed(1) },
-             leaderboard: leaderboard,
-             // ... Add other data pieces (tasks, history, chartData) here ...
+             tasks: tasks,
+             history: history,
+             chartData: chartData,
+             leaderboard: leaderboard
         };
 
         return {
@@ -76,7 +104,7 @@ exports.handler = async (event) => {
         };
 
     } catch (error) {
-        console.error('Error fetching sheet data:', error);
+        console.error('Error in Netlify function:', error);
         return {
             statusCode: 500,
             body: JSON.stringify({ error: 'Failed to retrieve dashboard data.', details: error.message }),
