@@ -9,7 +9,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script type="text/javascript" src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
     <style>
-        /* All CSS is the same as the last working version */
         :root { --primary-color: #0d6efd; --accent-color: #6f42c1; --success-color: #198754; --warning-color: #fd7e14; --danger-color: #dc3545; --text-color: #212529; --light-text-color: #6c757d; --bg-color: #f8f9fa; --card-bg-color: #ffffff; --border-color: #dee2e6; }
         body { font-family: 'Inter', sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; display: flex; }
         .loader-container { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; width: 100%; }
@@ -72,7 +71,7 @@
     <div id="netlify-identity-button-container" data-netlify-identity-button></div>
 
     <script>
-        // Listen for Netlify Identity events
+        // --- EVENT LISTENERS AND MAIN FETCH LOGIC ---
         netlifyIdentity.on('login', user => { netlifyIdentity.close(); fetchAndRenderDashboard(user); });
         netlifyIdentity.on('logout', () => { location.reload(); });
 
@@ -96,31 +95,72 @@
                     throw new Error(errorData.details || `Server error: ${response.statusText}`);
                 }
                 const data = await response.json();
-
-                if (data.view === 'Agent') {
-                    renderAgentDashboard(data);
-                } else if (data.view === 'Manager') {
-                    renderManagerDashboard(data);
-                } else if (data.view === 'HR') {
-                    renderHRDashboard(data);
-                } else {
-                    throw new Error("Unknown dashboard view received from server.");
-                }
+                
+                if (data.view === 'Agent') { renderAgentDashboard(data); } 
+                else if (data.view === 'Manager') { renderManagerDashboard(data); } 
+                else if (data.view === 'HR') { renderHRDashboard(data); } 
+                else { throw new Error("Unknown dashboard view received from server."); }
 
                 document.getElementById('loader').style.display = 'none';
                 document.getElementById('dashboard-container').style.display = 'block';
                 document.getElementById('dashboard-container').style.opacity = 1;
-
             } catch (error) {
                 document.getElementById('loader').innerHTML = `<div class="loader-text" style="color:var(--danger-color);">Error: ${error.message}</div>`;
             }
         }
 
+        // --- RENDER FUNCTION FOR MANAGER VIEW ---
+        function renderManagerDashboard(data) {
+            document.querySelector('.sidebar').innerHTML = `<div class="sidebar-header"><h2>Manager View</h2><div class="rank">${data.header.name}</div></div>`;
+            const mainContent = document.querySelector('.main-content');
+            
+            let kpiHtml = '';
+            for (const [key, value] of Object.entries(data.kpis)) {
+                const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+                kpiHtml += `<div class="kpi-card"><h3>${label}</h3><div class="value">${value}</div></div>`;
+            }
+
+            let teamHtml = '';
+            data.teamPerformance.forEach(agent => {
+                teamHtml += `<tr><td>${agent.name}</td><td>${agent.team}</td><td>$${agent.achieved}</td><td>$${agent.quota}</td><td><div class="progress-bar"><div class="progress-bar-inner" style="width: ${agent.progress}%;"></div></div></td></tr>`;
+            });
+
+            let pointsLeaderboardHtml = '';
+            const rankIcons = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+            data.pointsLeaderboard.forEach((agent, index) => {
+                pointsLeaderboardHtml += `<div class="leaderboard-row"><div class="rank">${rankIcons[index]}</div><div class="name">${agent.name}</div><div class="points">${(agent.points || 0).toLocaleString()} pts</div></div>`;
+            });
+            
+            mainContent.innerHTML = `
+                <h1>Sales Manager Dashboard</h1>
+                <div class="grid-container kpi-grid card">${kpiHtml}</div>
+                <div class="grid-container" style="grid-template-columns: 3fr 2fr;">
+                    <div class="card"><h2>Team Performance (This Month)</h2><div style="max-height: 400px; overflow-y: auto;"><table><thead><tr><th>Agent</th><th>Team</th><th>Achieved</th><th>Quota</th><th>Progress</th></tr></thead><tbody>${teamHtml}</tbody></table></div></div>
+                    <div class="card"><h2>Revenue Trend (6 Months)</h2><div class="chart-container" style="height: 400px;"><canvas id="revenueTrendChart"></canvas></div></div>
+                </div>
+                <div class="grid-container" style="grid-template-columns: 2fr 1fr;">
+                    <div class="card"><h2>Team Pipeline by Stage</h2><div class="chart-container"><canvas id="managerPipelineChart"></canvas></div></div>
+                    <div class="card"><h2>Top 5 by Points</h2><div>${pointsLeaderboardHtml}</div></div>
+                </div>`;
+
+            renderManagerCharts(data.chartData);
+        }
+
+        function renderManagerCharts(chartData) {
+            new Chart(document.getElementById('revenueTrendChart'), {
+                type: 'line', data: { labels: chartData.revenueTrend.labels, datasets: [{ label: 'Total Revenue', data: chartData.revenueTrend.data, backgroundColor: 'rgba(13, 110, 253, 0.1)', borderColor: 'var(--primary-color)', borderWidth: 2, fill: true, tension: 0.3 }] },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { callback: value => '$' + (value/1000) + 'k' } } } }
+            });
+
+            new Chart(document.getElementById('managerPipelineChart'), {
+                type: 'bar', data: { labels: chartData.pipelineFunnel.labels, datasets: [{ label: 'Potential Revenue', data: chartData.pipelineFunnel.data, backgroundColor: ['#6f42c1', '#855eca', '#9b7ad3', '#b297dd'] }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { callback: value => '$' + (value/1000) + 'k' } } } }
+            });
+        }
+        
         // --- RENDER FUNCTION FOR AGENT VIEW ---
         function renderAgentDashboard(data) {
-            // THE FIX IS HERE: Default points to 0 if they are missing, preventing toLocaleString() from crashing.
             const userPoints = data.header.points || 0;
-
             const sidebarHtml = `<div class="sidebar-header"><h2>${data.header.name}</h2><div class="rank">Rank: <strong>${data.header.rank || 'N/A'}</strong></div><div class="points">${userPoints.toLocaleString()} pts</div></div><nav><a class="nav-link active" onclick="showPage('overview')"><i class="material-icons">dashboard</i>Overview</a><a class="nav-link" onclick="showPage('leaderboard')"><i class="material-icons">emoji_events</i>Leaderboard</a><a class="nav-link" onclick="showPage('history')"><i class="material-icons">history</i>Activity History</a></nav>`;
             document.querySelector('.sidebar').innerHTML = sidebarHtml;
             
@@ -128,60 +168,53 @@
             mainContent.innerHTML = `
                 <div id="page-overview" class="page active"></div>
                 <div id="page-leaderboard" class="page"></div>
-                <div id="page-history" class="page"></div>
-            `;
+                <div id="page-history" class="page"></div>`;
             buildOverviewPage(data);
             buildLeaderboardPage(data);
             buildHistoryPage(data);
         }
+        
+        // --- RENDER FUNCTION FOR HR VIEW ---
+        function renderHRDashboard(data) {
+            document.querySelector('.sidebar').innerHTML = `<div class="sidebar-header"><h2>HR View</h2><div class="rank">${data.header.name}</div></div>`;
+            const mainContent = document.querySelector('.main-content');
+            let personnelHtml = '';
+            data.personnel.forEach(p => { personnelHtml += `<tr><td>${p.name}</td><td>${p.email}</td><td>${p.role}</td><td>${p.team}</td></tr>`; });
+            mainContent.innerHTML = `<h1>HR Dashboard</h1><div class="grid-container" style="grid-template-columns: 1fr 1fr;"><div class="card"><h2>Post New Announcement</h2><form id="announcement-form"><input type="text" id="announcement-title" placeholder="Announcement Title" required><textarea id="announcement-message" rows="4" placeholder="Announcement Message" required></textarea><button type="submit">Post Announcement</button></form></div><div class="card"><h2>Personnel Directory</h2><div style="max-height: 400px; overflow-y: auto;"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Team</th></tr></thead><tbody>${personnelHtml}</tbody></table></div></div></div>`;
+            document.getElementById('announcement-form').addEventListener('submit', handlePost);
+        }
+        
+        function handlePost(e) {
+            e.preventDefault();
+            alert('Posting functionality is a future step and requires a separate Netlify function for writing data.');
+        }
 
+        // --- HELPER FUNCTIONS FOR AGENT VIEW ---
         function buildOverviewPage(data) {
             const overviewPage = document.getElementById('page-overview');
             overviewPage.innerHTML = `<h1>Sales Dashboard</h1><div class="grid-container kpi-grid card"><div class="kpi-card"><h3>Revenue (This Month)</h3><div class="value">${data.kpis.myRevenue}</div></div><div class="kpi-card"><h3>Quota Progress</h3><div class="value">${data.kpis.quotaProgress}%</div></div><div class="kpi-card"><h3>Avg. Deal Size (Month)</h3><div class="value">${data.kpis.avgDealSize}</div></div><div class="kpi-card"><h3>Commission (This Month)</h3><div class="value">${data.kpis.myCommission}</div></div></div><div class="grid-container charts-grid"><div class="card"><h2>Quota Attainment</h2><div class="gauge-container"><canvas id="quotaGaugeChart"></canvas><div id="quotaGaugeText" class="gauge-text"></div></div></div><div class="card"><h2>Sales Pipeline</h2><div class="chart-container"><canvas id="pipelineChart"></canvas></div></div><div class="card"><h2>Revenue by Product</h2><div class="chart-container"><canvas id="productChart"></canvas></div></div></div><div class="grid-container action-grid"><div class="card"><h2>Weekly Missions</h2><div id="missions-container"></div></div><div class="card"><h2>Top 3 Agents</h2><div id="mini-leaderboard-container"></div></div><div class="card"><h2>Your Next Target</h2><div id="next-target-container"></div></div></div>`;
-            renderCharts(data.chartData, data.kpis.quotaProgress);
-
+            renderAgentCharts(data.chartData, data.kpis.quotaProgress);
             let missionsHtml = '';
             (data.tasks || []).forEach(task => { const isCompleted = task.status === 'Completed'; missionsHtml += `<div class="mission"><input type="checkbox" id="task-${task.id}" ${isCompleted ? 'checked disabled' : ''} onchange="handleTaskClick(this, '${task.id}')"><label for="task-${task.id}" style="flex-grow:1; margin-left:0.5rem;">${task.description}</label><strong style="color:var(--success-color);">+${task.points}</strong></div>`; });
             document.getElementById('missions-container').innerHTML = missionsHtml || '<p>No active missions.</p>';
-            
             let miniLeaderboardHtml = '';
             const rankIconsMini = ['🥇', '🥈', '🥉'];
             (data.leaderboard || []).slice(0, 3).forEach((agent, index) => { miniLeaderboardHtml += `<div class="leaderboard-row"><div class="rank">${rankIconsMini[index]}</div><div class="name">${agent.name}</div><div class="points">${(agent.points || 0).toLocaleString()} pts</div></div>`; });
             document.getElementById('mini-leaderboard-container').innerHTML = miniLeaderboardHtml;
-
             let nextTargetHtml = '';
             const myRank = data.header.rank;
-            // THE FIX IS HERE: Add checks to ensure agentAbove and their points exist before doing math.
-            if (myRank > 1 && data.leaderboard && data.leaderboard.length >= myRank) {
-                const agentAbove = data.leaderboard[myRank - 2];
-                if (agentAbove && typeof agentAbove.points === 'number' && typeof data.header.points === 'number') {
-                    const pointsNeeded = agentAbove.points - data.header.points;
-                    nextTargetHtml = `<p>You are <strong>${pointsNeeded.toLocaleString()} points</strong> behind ${agentAbove.name}!</p>`;
-                } else {
-                    nextTargetHtml = `<p>Keep climbing the ranks!</p>`;
-                }
-            } else {
-                nextTargetHtml = `<p style="font-size: 1.2rem; text-align: center;">🎉<br>You're #1! Great work!</p>`;
-            }
+            if (myRank > 1 && data.leaderboard && data.leaderboard.length >= myRank) { const agentAbove = data.leaderboard[myRank - 2]; if (agentAbove && typeof agentAbove.points === 'number' && typeof data.header.points === 'number') { const pointsNeeded = agentAbove.points - data.header.points; nextTargetHtml = `<p>You are <strong>${pointsNeeded.toLocaleString()} points</strong> behind ${agentAbove.name}!</p>`; } else { nextTargetHtml = `<p>Keep climbing the ranks!</p>`; } } else { nextTargetHtml = `<p style="font-size: 1.2rem; text-align: center;">🎉<br>You're #1! Great work!</p>`; }
             document.getElementById('next-target-container').innerHTML = nextTargetHtml;
         }
-
-        // The rest of the functions are unchanged
-        function buildLeaderboardPage(data) { /* ... Same as last version ... */ }
-        function buildHistoryPage(data) { /* ... Same as last version ... */ }
-        function renderManagerDashboard(data) { /* ... Same as last version ... */ }
-        function renderHRDashboard(data) { /* ... Same as last version ... */ }
-        function handlePost(e) { /* ... Same as last version ... */ }
-        function renderCharts(chartData, quotaProgress) { /* ... Same as last version ... */ }
-        function showPage(pageName) { /* ... Same as last version ... */ }
-
-        // Need to paste the full versions of these functions back in
         function buildLeaderboardPage(data) { let topLeaderHtml = ''; const top3 = data.leaderboard.slice(0, 3); const rankIcons = ['🥇', '🥈', '🥉']; top3.forEach((agent, index) => { topLeaderHtml += `<div class="card leader-card rank-${index + 1}"><span class="rank-icon">${rankIcons[index]}</span><h3>${agent.name}</h3><p class="points-label">${(agent.points || 0).toLocaleString()} pts</p></div>`; }); let fullLeaderboardHtml = ''; data.leaderboard.forEach(agent => { const isCurrentUser = agent.name === data.header.name; fullLeaderboardHtml += `<tr style="${isCurrentUser ? 'background-color: #e9ecef; font-weight: 600;' : ''}"><td>#${agent.rank}</td><td>${agent.name} ${isCurrentUser ? '(You)' : ''}</td><td>${agent.team}</td><td>${(agent.points || 0).toLocaleString()}</td></tr>`; }); const pageHtml = `<h1>Team Leaderboard</h1><div class="top-leader-grid">${topLeaderHtml}</div><div class="card"><h2>Full Rankings</h2><table><thead><tr><th>Rank</th><th>Agent</th><th>Team</th><th>Total Points</th></tr></thead><tbody>${fullLeaderboardHtml}</tbody></table></div>`; document.getElementById('page-leaderboard').innerHTML = pageHtml; }
         function buildHistoryPage(data) { let historyHtml = ''; data.history.forEach(item => { historyHtml += `<tr><td>${item.date}</td><td>${item.action}</td><td>${item.points}</td></tr>`; }); const pageHtml = `<h1>Your Activity History</h1><div class="card"><table><thead><tr><th>Date</th><th>Action</th><th>Points Awarded</th></tr></thead><tbody>${historyHtml}</tbody></table></div>`; document.getElementById('page-history').innerHTML = pageHtml; }
-        function renderManagerDashboard(data) { document.querySelector('.sidebar').innerHTML = `<div class="sidebar-header"><h2>Manager View</h2><div class="rank">${data.header.name}</div></div>`; const mainContent = document.querySelector('.main-content'); let kpiHtml = ''; for (const [key, value] of Object.entries(data.kpis)) { const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()); kpiHtml += `<div class="kpi-card"><h3>${label}</h3><div class="value">${value}</div></div>`; } let teamHtml = ''; data.teamPerformance.forEach(agent => { teamHtml += `<tr><td>${agent.name}</td><td>${agent.team}</td><td>$${agent.achieved}</td><td>$${agent.quota}</td><td><div class="progress-bar"><div class="progress-bar-inner" style="width: ${agent.progress}%;"></div></div></td></tr>`; }); mainContent.innerHTML = `<h1>Sales Manager Dashboard</h1><div class="grid-container kpi-grid card">${kpiHtml}</div><div class="grid-container" style="grid-template-columns: 2fr 1fr;"><div class="card"><h2>Team Performance (This Month)</h2><div style="max-height: 400px; overflow-y: auto;"><table><thead><tr><th>Agent</th><th>Team</th><th>Achieved</th><th>Quota</th><th>Progress</th></tr></thead><tbody>${teamHtml}</tbody></table></div></div><div class="card"><h2>Revenue by Team</h2><div style="height: 350px;"><canvas id="teamChart"></canvas></div></div></div>`; new Chart(document.getElementById('teamChart'), { type: 'doughnut', data: { labels: data.chartData.salesByTeam.labels, datasets: [{ data: data.chartData.salesByTeam.data, backgroundColor: ['#0d6efd', '#6f42c1', '#198754'] }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } } }); }
-        function renderHRDashboard(data) { document.querySelector('.sidebar').innerHTML = `<div class="sidebar-header"><h2>HR View</h2><div class="rank">${data.header.name}</div></div>`; const mainContent = document.querySelector('.main-content'); let personnelHtml = ''; data.personnel.forEach(p => { personnelHtml += `<tr><td>${p.name}</td><td>${p.email}</td><td>${p.role}</td><td>${p.team}</td></tr>`; }); mainContent.innerHTML = `<h1>HR Dashboard</h1><div class="grid-container" style="grid-template-columns: 1fr 1fr;"><div class="card"><h2>Post New Announcement</h2><form id="announcement-form"><input type="text" id="announcement-title" placeholder="Announcement Title" required><textarea id="announcement-message" rows="4" placeholder="Announcement Message" required></textarea><button type="submit">Post Announcement</button></form></div><div class="card"><h2>Personnel Directory</h2><div style="max-height: 400px; overflow-y: auto;"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Team</th></tr></thead><tbody>${personnelHtml}</tbody></table></div></div></div>`; document.getElementById('announcement-form').addEventListener('submit', handlePost); }
-        function handlePost(e) { e.preventDefault(); alert('Posting functionality coming soon!'); }
-        let myCharts = {}; function renderCharts(chartData, quotaProgress) { Object.values(myCharts).forEach(chart => chart.destroy()); const quotaCtx = document.getElementById('quotaGaugeChart').getContext('2d'); const progress = parseFloat(quotaProgress); document.getElementById('quotaGaugeText').textContent = progress.toFixed(1) + '%'; myCharts.quota = new Chart(quotaCtx, { type: 'doughnut', data: { datasets: [{ data: [progress, 100 - progress], backgroundColor: ['var(--primary-color)', '#e9ecef'], borderColor: 'var(--card-bg-color)', borderWidth: 4, cutout: '80%' }] }, options: { responsive: true, maintainAspectRatio: false, circumference: 180, rotation: -90, plugins: { legend: { display: false }, tooltip: { enabled: false } } } }); const pipelineCtx = document.getElementById('pipelineChart').getContext('2d'); myCharts.pipeline = new Chart(pipelineCtx, { type: 'bar', data: { labels: chartData.pipelineFunnel.labels, datasets: [{ label: 'Potential Revenue', data: chartData.pipelineFunnel.data, backgroundColor: ['#6f42c1', '#855eca', '#9b7ad3', '#b297dd'], borderWidth: 0 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { callback: value => '$' + (value/1000) + 'k' } } } } }); const productCtx = document.getElementById('productChart').getContext('2d'); myCharts.product = new Chart(productCtx, { type: 'doughnut', data: { labels: chartData.revenueByProduct.labels, datasets: [{ label: 'Revenue', data: chartData.revenueByProduct.data, backgroundColor: ['#0d6efd', '#6f42c1', '#198754', '#fd7e14', '#6c757d'], borderColor: 'var(--card-bg-color)', borderWidth: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } } }); }
+        let myCharts = {};
+        function renderAgentCharts(chartData, quotaProgress) {
+            Object.values(myCharts).forEach(chart => chart.destroy());
+            const quotaCtx = document.getElementById('quotaGaugeChart').getContext('2d'); const progress = parseFloat(quotaProgress); document.getElementById('quotaGaugeText').textContent = progress.toFixed(1) + '%'; myCharts.quota = new Chart(quotaCtx, { type: 'doughnut', data: { datasets: [{ data: [progress, 100 - progress], backgroundColor: ['var(--primary-color)', '#e9ecef'], borderColor: 'var(--card-bg-color)', borderWidth: 4, cutout: '80%' }] }, options: { responsive: true, maintainAspectRatio: false, circumference: 180, rotation: -90, plugins: { legend: { display: false }, tooltip: { enabled: false } } } });
+            const pipelineCtx = document.getElementById('pipelineChart').getContext('2d'); myCharts.pipeline = new Chart(pipelineCtx, { type: 'bar', data: { labels: chartData.pipelineFunnel.labels, datasets: [{ label: 'Potential Revenue', data: chartData.pipelineFunnel.data, backgroundColor: ['#6f42c1', '#855eca', '#9b7ad3', '#b297dd'], borderWidth: 0 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { callback: value => '$' + (value/1000) + 'k' } } } } });
+            const productCtx = document.getElementById('productChart').getContext('2d'); myCharts.product = new Chart(productCtx, { type: 'doughnut', data: { labels: chartData.revenueByProduct.labels, datasets: [{ label: 'Revenue', data: chartData.revenueByProduct.data, backgroundColor: ['#0d6efd', '#6f42c1', '#198754', '#fd7e14', '#6c757d'], borderColor: 'var(--card-bg-color)', borderWidth: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } } });
+        }
         function showPage(pageName) { document.querySelectorAll('.page').forEach(p => p.classList.remove('active')); document.getElementById('page-' + pageName).classList.add('active'); document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active')); document.querySelector(`.nav-link[onclick="showPage('${pageName}')"]`).classList.add('active'); }
     </script>
 </body>
