@@ -13,7 +13,7 @@ exports.handler = async (event, context) => {
         // --- GOOGLE SHEETS SETUP ---
         const auth = new google.auth.GoogleAuth({
             credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON),
-            scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'], // Read-only is safer
+            scopes: ['https://www.googleapis.com/auth/spreadsheets'], // Read & write permission
         });
         const sheets = google.sheets({ version: 'v4', auth });
         const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
