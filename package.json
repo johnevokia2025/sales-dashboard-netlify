@@ -1,0 +1,7 @@
+{
+  "name": "sales-dashboard-netlify",
+  "version": "1.0.0",
+  "dependencies": {
+    "googleapis": "^134.0.0"
+  }
+}
