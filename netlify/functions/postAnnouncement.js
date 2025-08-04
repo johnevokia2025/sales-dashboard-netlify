@@ -1,5 +1,18 @@
 const { google } = require('googleapis');
 
+// NEW: A helper function to format dates in a way Google Sheets loves.
+function formatDateForSheet(date) {
+    const pad = (num) => num.toString().padStart(2, '0');
+    const month = pad(date.getMonth() + 1); // getMonth() is 0-indexed
+    const day = pad(date.getDate());
+    const year = date.getFullYear();
+    const hours = pad(date.getHours());
+    const minutes = pad(date.getMinutes());
+    const seconds = pad(date.getSeconds());
+    // Returns a string like "08/15/2025 10:30:00"
+    return `${month}/${day}/${year} ${hours}:${minutes}:${seconds}`;
+}
+
 exports.handler = async (event, context) => {
     // 1. Check for authenticated user (SECURITY)
     const user = context.clientContext && context.clientContext.user;
@@ -18,7 +31,7 @@ exports.handler = async (event, context) => {
         // 3. Setup Google Sheets API client
         const auth = new google.auth.GoogleAuth({
             credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON),
-            scopes: ['https://www.googleapis.com/auth/spreadsheets'], // Allows writing
+            scopes: ['https://www.googleapis.com/auth/spreadsheets'],
         });
         const sheets = google.sheets({ version: 'v4', auth });
         const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
@@ -44,12 +57,12 @@ exports.handler = async (event, context) => {
         // 6. Append the new row to the HR_Announcements sheet
         await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'HR_Announcements!A:E', // Corrected range to include Audience
+            range: 'HR_Announcements!A:E',
             valueInputOption: 'USER_ENTERED',
             resource: {
                 values: [
-                    // THE FIX IS HERE: Use new Date() directly
-                    [new Date(), userEmail, title, message, 'All']
+                    // THE FIX IS HERE: We now use our special formatting function
+                    [formatDateForSheet(new Date()), userEmail, title, message, 'All']
                 ],
             },
         });
