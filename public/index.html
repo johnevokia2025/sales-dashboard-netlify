@@ -37,6 +37,11 @@
         .kpi-grid { grid-template-columns: repeat(4, 1fr); }
         .kpi-card h3 { font-size: 0.9rem; font-weight: 500; color: var(--light-text-color); margin-bottom: 0.5rem; }
         .kpi-card .value { font-size: 2.25rem; font-weight: 700; color: var(--text-color); }
+        /* THE FIX IS HERE: Styles for the new announcement bar */
+        .announcement-bar { background-color: #e9ecef; border-left: 5px solid var(--accent-color); padding: 1rem 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; }
+        .announcement-bar h3 { font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem 0; color: var(--accent-color); }
+        .announcement-bar p { margin: 0; }
+        /* (The rest of the CSS is the same) */
         .charts-grid { grid-template-columns: repeat(3, 1fr); }
         .chart-container { position: relative; height: 280px; width: 100%; }
         .gauge-container { position: relative; height: 140px; width: 100%; margin-top: 2rem; display: flex; align-items: center; justify-content: center; }
@@ -77,7 +82,6 @@
         // --- EVENT LISTENERS AND MAIN FETCH LOGIC ---
         netlifyIdentity.on('login', user => { netlifyIdentity.close(); fetchAndRenderDashboard(user); });
         netlifyIdentity.on('logout', () => { location.reload(); });
-
         document.addEventListener("DOMContentLoaded", () => {
             const user = netlifyIdentity.currentUser();
             const loader = document.getElementById('loader');
@@ -88,7 +92,6 @@
                 loader.innerHTML = `<div class="loader-text">Please log in to view the sales dashboard.</div>`;
             }
         });
-
         async function fetchAndRenderDashboard(user) {
             try {
                 const token = await user.jwt();
@@ -112,6 +115,50 @@
             }
         }
         
+        // --- RENDER FUNCTION FOR MANAGER VIEW ---
+        function renderManagerDashboard(data) {
+            document.querySelector('.sidebar').innerHTML = `<div class="sidebar-header"><h2>Manager View</h2><div class="rank">${data.header.name}</div></div>`;
+            const mainContent = document.querySelector('.main-content');
+            
+            let kpiHtml = '';
+            for (const [key, value] of Object.entries(data.kpis)) { const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()); kpiHtml += `<div class="kpi-card"><h3>${label}</h3><div class="value">${value}</div></div>`; }
+
+            let teamHtml = '';
+            data.teamPerformance.forEach(agent => { teamHtml += `<tr><td>${agent.name}</td><td>${agent.team}</td><td>$${agent.achieved}</td><td>$${agent.quota}</td><td><div class="progress-bar"><div class="progress-bar-inner" style="width: ${agent.progress}%;"></div></div></td></tr>`; });
+
+            let pointsLeaderboardHtml = '';
+            const rankIcons = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+            data.pointsLeaderboard.forEach((agent, index) => { pointsLeaderboardHtml += `<div class="leaderboard-row"><div class="rank">${rankIcons[index]}</div><div class="name">${agent.name}</div><div class="points">${(agent.points || 0).toLocaleString()} pts</div></div>`; });
+            
+            // THE FIX IS HERE: Add the announcement bar HTML
+            const announcementHtml = data.latestAnnouncement ? `<div class="announcement-bar"><h3>${data.latestAnnouncement.title}</h3><p>${data.latestAnnouncement.message}</p></div>` : '';
+
+            mainContent.innerHTML = `
+                <h1>Sales Manager Dashboard</h1>
+                ${announcementHtml}
+                <div class="grid-container kpi-grid card">${kpiHtml}</div>
+                <div class="grid-container" style="grid-template-columns: 3fr 2fr;"><div class="card"><h2>Team Performance (This Month)</h2><div style="max-height: 400px; overflow-y: auto;"><table><thead><tr><th>Agent</th><th>Team</th><th>Achieved</th><th>Quota</th><th>Progress</th></tr></thead><tbody>${teamHtml}</tbody></table></div></div><div class="card"><h2>Revenue Trend (6 Months)</h2><div class="chart-container" style="height: 400px;"><canvas id="revenueTrendChart"></canvas></div></div></div>
+                <div class="grid-container" style="grid-template-columns: 2fr 1fr;"><div class="card"><h2>Team Pipeline by Stage</h2><div class="chart-container"><canvas id="managerPipelineChart"></canvas></div></div><div class="card"><h2>Top 5 by Points</h2><div>${pointsLeaderboardHtml}</div></div></div>`;
+
+            renderManagerCharts(data.chartData);
+        }
+
+        // THE FIX IS HERE: The missing renderManagerCharts function is now defined.
+        function renderManagerCharts(chartData) {
+            if (document.getElementById('revenueTrendChart')) {
+                new Chart(document.getElementById('revenueTrendChart'), {
+                    type: 'line', data: { labels: chartData.revenueTrend.labels, datasets: [{ label: 'Total Revenue', data: chartData.revenueTrend.data, backgroundColor: 'rgba(13, 110, 253, 0.1)', borderColor: 'var(--primary-color)', borderWidth: 2, fill: true, tension: 0.3 }] },
+                    options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { callback: value => '$' + (value/1000) + 'k' } } } }
+                });
+            }
+            if (document.getElementById('managerPipelineChart')) {
+                new Chart(document.getElementById('managerPipelineChart'), {
+                    type: 'bar', data: { labels: chartData.pipelineFunnel.labels, datasets: [{ label: 'Potential Revenue', data: chartData.pipelineFunnel.data, backgroundColor: ['#6f42c1', '#855eca', '#9b7ad3', '#b297dd'] }] },
+                    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { callback: value => '$' + (value/1000) + 'k' } } } }
+                });
+            }
+        }
+        
         // --- RENDER FUNCTION FOR AGENT VIEW ---
         function renderAgentDashboard(data) {
             const userPoints = data.header.points || 0;
@@ -127,22 +174,7 @@
             buildLeaderboardPage(data);
             buildHistoryPage(data);
         }
-
-        // --- RENDER FUNCTION FOR MANAGER VIEW ---
-        function renderManagerDashboard(data) {
-            document.querySelector('.sidebar').innerHTML = `<div class="sidebar-header"><h2>Manager View</h2><div class="rank">${data.header.name}</div></div>`;
-            const mainContent = document.querySelector('.main-content');
-            let kpiHtml = '';
-            for (const [key, value] of Object.entries(data.kpis)) { const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()); kpiHtml += `<div class="kpi-card"><h3>${label}</h3><div class="value">${value}</div></div>`; }
-            let teamHtml = '';
-            data.teamPerformance.forEach(agent => { teamHtml += `<tr><td>${agent.name}</td><td>${agent.team}</td><td>$${agent.achieved}</td><td>$${agent.quota}</td><td><div class="progress-bar"><div class="progress-bar-inner" style="width: ${agent.progress}%;"></div></div></td></tr>`; });
-            let pointsLeaderboardHtml = '';
-            const rankIcons = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
-            data.pointsLeaderboard.forEach((agent, index) => { pointsLeaderboardHtml += `<div class="leaderboard-row"><div class="rank">${rankIcons[index]}</div><div class="name">${agent.name}</div><div class="points">${(agent.points || 0).toLocaleString()} pts</div></div>`; });
-            mainContent.innerHTML = `<h1>Sales Manager Dashboard</h1><div class="grid-container kpi-grid card">${kpiHtml}</div><div class="grid-container" style="grid-template-columns: 3fr 2fr;"><div class="card"><h2>Team Performance (This Month)</h2><div style="max-height: 400px; overflow-y: auto;"><table><thead><tr><th>Agent</th><th>Team</th><th>Achieved</th><th>Quota</th><th>Progress</th></tr></thead><tbody>${teamHtml}</tbody></table></div></div><div class="card"><h2>Revenue Trend (6 Months)</h2><div class="chart-container" style="height: 400px;"><canvas id="revenueTrendChart"></canvas></div></div></div><div class="grid-container" style="grid-template-columns: 2fr 1fr;"><div class="card"><h2>Team Pipeline by Stage</h2><div class="chart-container"><canvas id="managerPipelineChart"></canvas></div></div><div class="card"><h2>Top 5 by Points</h2><div>${pointsLeaderboardHtml}</div></div></div>`;
-            renderManagerCharts(data.chartData);
-        }
-
+        
         // --- RENDER FUNCTION FOR HR VIEW ---
         function renderHRDashboard(data) {
             document.querySelector('.sidebar').innerHTML = `<div class="sidebar-header"><h2>HR View</h2><div class="rank">${data.header.name}</div></div>`;
@@ -158,7 +190,12 @@
         // --- HELPER FUNCTIONS FOR AGENT VIEW ---
         function buildOverviewPage(data) {
             const overviewPage = document.getElementById('page-overview');
-            overviewPage.innerHTML = `<h1>Sales Dashboard</h1><div class="grid-container kpi-grid card"><div class="kpi-card"><h3>Revenue (This Month)</h3><div class="value">${data.kpis.myRevenue}</div></div><div class="kpi-card"><h3>Quota Progress</h3><div class="value">${data.kpis.quotaProgress}%</div></div><div class="kpi-card"><h3>Avg. Deal Size (Month)</h3><div class="value">${data.kpis.avgDealSize}</div></div><div class="kpi-card"><h3>Commission (This Month)</h3><div class="value">${data.kpis.myCommission}</div></div></div><div class="grid-container charts-grid"><div class="card"><h2>Quota Attainment</h2><div class="gauge-container"><canvas id="quotaGaugeChart"></canvas><div id="quotaGaugeText" class="gauge-text"></div></div></div><div class="card"><h2>Sales Pipeline</h2><div class="chart-container"><canvas id="pipelineChart"></canvas></div></div><div class="card"><h2>Revenue by Product</h2><div class="chart-container"><canvas id="productChart"></canvas></div></div></div><div class="grid-container action-grid"><div class="card"><h2>Weekly Missions</h2><div id="missions-container"></div></div><div class="card"><h2>Top 3 Agents</h2><div id="mini-leaderboard-container"></div></div><div class="card"><h2>Your Next Target</h2><div id="next-target-container"></div></div></div>`;
+            // THE FIX IS HERE: Add the announcement bar HTML
+            const announcementHtml = data.latestAnnouncement ? `<div class="announcement-bar"><h3>${data.latestAnnouncement.title}</h3><p>${data.latestAnnouncement.message}</p></div>` : '';
+            overviewPage.innerHTML = `
+                <h1>Sales Dashboard</h1>
+                ${announcementHtml}
+                <div class="grid-container kpi-grid card"><div class="kpi-card"><h3>Revenue (This Month)</h3><div class="value">${data.kpis.myRevenue}</div></div><div class="kpi-card"><h3>Quota Progress</h3><div class="value">${data.kpis.quotaProgress}%</div></div><div class="kpi-card"><h3>Avg. Deal Size (Month)</h3><div class="value">${data.kpis.avgDealSize}</div></div><div class="kpi-card"><h3>Commission (This Month)</h3><div class="value">${data.kpis.myCommission}</div></div></div><div class="grid-container charts-grid"><div class="card"><h2>Quota Attainment</h2><div class="gauge-container"><canvas id="quotaGaugeChart"></canvas><div id="quotaGaugeText" class="gauge-text"></div></div></div><div class="card"><h2>Sales Pipeline</h2><div class="chart-container"><canvas id="pipelineChart"></canvas></div></div><div class="card"><h2>Revenue by Product</h2><div class="chart-container"><canvas id="productChart"></canvas></div></div></div><div class="grid-container action-grid"><div class="card"><h2>Weekly Missions</h2><div id="missions-container"></div></div><div class="card"><h2>Top 3 Agents</h2><div id="mini-leaderboard-container"></div></div><div class="card"><h2>Your Next Target</h2><div id="next-target-container"></div></div></div>`;
             renderAgentCharts(data.chartData, data.kpis.quotaProgress);
             let missionsHtml = ''; (data.tasks || []).forEach(task => { const isCompleted = task.status === 'Completed'; missionsHtml += `<div class="mission"><input type="checkbox" id="task-${task.id}" ${isCompleted ? 'checked disabled' : ''} onchange="handleTaskClick(this, '${task.id}')"><label for="task-${task.id}" style="flex-grow:1; margin-left:0.5rem;">${task.description}</label><strong style="color:var(--success-color);">+${task.points}</strong></div>`; }); document.getElementById('missions-container').innerHTML = missionsHtml || '<p>No active missions.</p>';
             let miniLeaderboardHtml = ''; const rankIconsMini = ['🥇', '🥈', '🥉']; (data.leaderboard || []).slice(0, 3).forEach((agent, index) => { miniLeaderboardHtml += `<div class="leaderboard-row"><div class="rank">${rankIconsMini[index]}</div><div class="name">${agent.name}</div><div class="points">${(agent.points || 0).toLocaleString()} pts</div></div>`; }); document.getElementById('mini-leaderboard-container').innerHTML = miniLeaderboardHtml;
@@ -173,13 +210,7 @@
             const pipelineCtx = document.getElementById('pipelineChart').getContext('2d'); myCharts.pipeline = new Chart(pipelineCtx, { type: 'bar', data: { labels: chartData.pipelineFunnel.labels, datasets: [{ label: 'Potential Revenue', data: chartData.pipelineFunnel.data, backgroundColor: ['#6f42c1', '#855eca', '#9b7ad3', '#b297dd'], borderWidth: 0 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { callback: value => '$' + (value/1000) + 'k' } } } } });
             const productCtx = document.getElementById('productChart').getContext('2d'); myCharts.product = new Chart(productCtx, { type: 'doughnut', data: { labels: chartData.revenueByProduct.labels, datasets: [{ label: 'Revenue', data: chartData.revenueByProduct.data, backgroundColor: ['#0d6efd', '#6f42c1', '#198754', '#fd7e14', '#6c757d'], borderColor: 'var(--card-bg-color)', borderWidth: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } } });
         }
-        function showPage(pageName) {
-            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-            // THE FIX IS HERE: Corrected the single quote issue
-            document.getElementById('page-' + pageName).classList.add('active');
-            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-            document.querySelector(`.nav-link[onclick="showPage('${pageName}')"]`).classList.add('active');
-        }
+        function showPage(pageName) { document.querySelectorAll('.page').forEach(p => p.classList.remove('active')); document.getElementById('page-' + pageName).classList.add('active'); document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active')); document.querySelector(`.nav-link[onclick="showPage('${pageName}')"]`).classList.add('active'); }
     </script>
 </body>
 </html>
